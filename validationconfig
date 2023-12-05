@@ -1,0 +1,46 @@
+import javax.validation.ConstraintViolation;
+import javax.validation.Validation;
+import javax.validation.Validator;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+public class XmlConfigService {
+
+    private final Validator validator;
+
+    public XmlConfigService() {
+        this.validator = Validation.buildDefaultValidatorFactory().getValidator();
+    }
+
+    public List<XmlConfig> readValidXmlConfigs(String xmlFolderPath) {
+        List<XmlConfig> xmlConfigs = readAllXmlConfigs(xmlFolderPath);
+
+        return xmlConfigs.stream()
+                .filter(this::isValidXmlConfig)
+                .collect(Collectors.toList());
+    }
+
+    private List<XmlConfig> readAllXmlConfigs(String xmlFolderPath) {
+        // Your existing logic to read XML configs
+        // ...
+
+        // For demonstration, let's assume you have a list of XmlConfig objects
+        return List.of(new XmlConfig(), new XmlConfig());
+    }
+
+    private boolean isValidXmlConfig(XmlConfig xmlConfig) {
+        Set<ConstraintViolation<XmlConfig>> violations = validator.validate(xmlConfig);
+
+        if (!violations.isEmpty()) {
+            // Handle validation errors (you can log them or perform other actions)
+            for (ConstraintViolation<XmlConfig> violation : violations) {
+                System.err.println("Validation error: " + violation.getMessage());
+            }
+
+            return false; // Invalid XML config
+        }
+
+        return true; // Valid XML config
+    }
+}
