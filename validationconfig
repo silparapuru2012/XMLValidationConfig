@@ -44,3 +44,54 @@ public class XmlConfigService {
         return true; // Valid XML config
     }
 }
+
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Pattern;
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlElement;
+import javax.xml.bind.annotation.XmlRootElement;
+
+import com.sun.istack.NotNull;
+
+@XmlRootElement
+@XmlAccessorType(XmlAccessType.FIELD)
+public class XmlConfig {
+
+    @NotBlank(message = "Source folder cannot be blank")
+    @XmlElement
+    private String sourceFolder;
+
+    @NotBlank(message = "Destination folder cannot be blank")
+    @XmlElement
+    private String destinationFolder;
+
+    @NotBlank(message = "Trigger time cannot be blank")
+    @XmlElement
+    private String triggerTime;
+
+    @NotBlank(message = "SFTP host cannot be blank")
+    @XmlElement
+    private String sftpHost;
+
+    @NotNull(message = "SFTP port cannot be null")
+    @XmlElement
+    private Integer sftpPort;
+
+    @NotBlank(message = "SFTP username cannot be blank")
+    @XmlElement
+    private String sftpUsername;
+
+    @NotBlank(message = "SFTP password cannot be blank")
+    @XmlElement
+    private String sftpPassword;
+
+    @NotBlank(message = "Action cannot be blank")
+    @Pattern(regexp = "^(UPLOAD|DOWNLOAD)$", message = "Action must be either UPLOAD or DOWNLOAD")
+    @XmlElement
+    private String action;
+
+    // Getters and setters
+
+    // ...
+}
