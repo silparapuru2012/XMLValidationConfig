@@ -1,97 +1,70 @@
-import javax.validation.ConstraintViolation;
-import javax.validation.Validation;
-import javax.validation.Validator;
-import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
+public interface ActionService {
+    void performAction(XmlConfig xmlConfig, EmailService emailService);
+}
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
-public class XmlConfigService {
+import java.util.Map;
 
-    private final Validator validator;
+@Service
+public class XmlProcessingService {
 
-    public XmlConfigService() {
-        this.validator = Validation.buildDefaultValidatorFactory().getValidator();
+    private static final Logger logger = LoggerFactory.getLogger(XmlProcessingService.class);
+
+    private final Map<String, ActionService> actionServices;
+    private final EmailService emailService;
+
+    public XmlProcessingService(Map<String, ActionService> actionServices, EmailService emailService) {
+        this.actionServices = actionServices;
+        this.emailService = emailService;
     }
 
-    public List<XmlConfig> readValidXmlConfigs(String xmlFolderPath) {
-        List<XmlConfig> xmlConfigs = readAllXmlConfigs(xmlFolderPath);
+    public void processXMLFile(XmlConfig xmlConfig) {
+        String action = xmlConfig.getAction().toLowerCase();
 
-        return xmlConfigs.stream()
-                .filter(this::isValidXmlConfig)
-                .collect(Collectors.toList());
+        if (actionServices.containsKey(action)) {
+            actionServices.get(action).performAction(xmlConfig, emailService);
+        } else {
+            logger.info("Unknown action: {}", action);
+        }
     }
-
-    private List<XmlConfig> readAllXmlConfigs(String xmlFolderPath) {
-        // Your existing logic to read XML configs
+}
+@Service
+public class UploadService implements ActionService {
+    @Override
+    public void performAction(XmlConfig xmlConfig, EmailService emailService) {
+        // Implement upload logic
         // ...
 
-        // For demonstration, let's assume you have a list of XmlConfig objects
-        return List.of(new XmlConfig(), new XmlConfig());
-    }
-
-    private boolean isValidXmlConfig(XmlConfig xmlConfig) {
-        Set<ConstraintViolation<XmlConfig>> violations = validator.validate(xmlConfig);
-
-        if (!violations.isEmpty()) {
-            // Handle validation errors (you can log them or perform other actions)
-            for (ConstraintViolation<XmlConfig> violation : violations) {
-                System.err.println("Validation error: " + violation.getMessage());
-            }
-
-            return false; // Invalid XML config
-        }
-
-        return true; // Valid XML config
+        // Use emailService if needed
+        emailService.sendEmail("Upload completed", "Files uploaded successfully!");
     }
 }
 
-import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.Pattern;
-import javax.xml.bind.annotation.XmlAccessType;
-import javax.xml.bind.annotation.XmlAccessorType;
-import javax.xml.bind.annotation.XmlElement;
-import javax.xml.bind.annotation.XmlRootElement;
+@Service
+public class DownloadService implements ActionService {
+    @Override
+    public void performAction(XmlConfig xmlConfig, EmailService emailService) {
+        // Implement download logic
+        // ...
 
-import com.sun.istack.NotNull;
-
-@XmlRootElement
-@XmlAccessorType(XmlAccessType.FIELD)
-public class XmlConfig {
-
-    @NotBlank(message = "Source folder cannot be blank")
-    @XmlElement
-    private String sourceFolder;
-
-    @NotBlank(message = "Destination folder cannot be blank")
-    @XmlElement
-    private String destinationFolder;
-
-    @NotBlank(message = "Trigger time cannot be blank")
-    @XmlElement
-    private String triggerTime;
-
-    @NotBlank(message = "SFTP host cannot be blank")
-    @XmlElement
-    private String sftpHost;
-
-    @NotNull(message = "SFTP port cannot be null")
-    @XmlElement
-    private Integer sftpPort;
-
-    @NotBlank(message = "SFTP username cannot be blank")
-    @XmlElement
-    private String sftpUsername;
-
-    @NotBlank(message = "SFTP password cannot be blank")
-    @XmlElement
-    private String sftpPassword;
-
-    @NotBlank(message = "Action cannot be blank")
-    @Pattern(regexp = "^(UPLOAD|DOWNLOAD)$", message = "Action must be either UPLOAD or DOWNLOAD")
-    @XmlElement
-    private String action;
-
-    // Getters and setters
-
-    // ...
+        // Use emailService if needed
+        emailService.sendEmail("Download completed", "Files downloaded successfully!");
+    }
 }
+
+@Configuration
+public class ServiceConfig {
+
+    @Bean
+    public UploadService uploadService() {
+        return new UploadService();
+    }
+
+    @Bean
+    public DownloadService downloadService() {
+        return new DownloadService();
+    }
+}
+
