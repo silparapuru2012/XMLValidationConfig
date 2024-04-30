@@ -1,70 +1,139 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-    <groupId>com.example</groupId>
-    <artifactId>sftp-server</artifactId>
-    <version>1.0.0</version>
+import java.io.IOException;
+import java.nio.file.*;
 
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.6.3</version>
-    </parent>
+public class FileSystemMonitor {
+    private static final Logger logger = LoggerFactory.getLogger(FileSystemMonitor.class);
 
-    <dependencies>
-        <!-- Spring Boot Starter -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
-        </dependency>
+    private final Path directory;
+    private final FileSystemEventListener listener;
 
-        <!-- Apache MINA SSHD -->
-        <dependency>
-            <groupId>org.apache.sshd</groupId>
-            <artifactId>sshd-spring-boot-starter</artifactId>
-            <version>2.7.0</version>
-        </dependency>
+    public FileSystemMonitor(Path directory, FileSystemEventListener listener) {
+        this.directory = directory;
+        this.listener = listener;
+    }
 
-        <!-- Additional dependencies if needed -->
-    </dependencies>
+    public void start() {
+        try (WatchService watchService = FileSystems.getDefault().newWatchService()) {
+            directory.register(watchService, StandardWatchEventKinds.ENTRY_CREATE, StandardWatchEventKinds.ENTRY_DELETE, StandardWatchEventKinds.ENTRY_MODIFY);
+            logger.info("File system monitor started for directory: {}", directory);
 
-    <properties>
-        <java.version>1.8</java.version>
-    </properties>
+            while (true) {
+                WatchKey key;
+                try {
+                    key = watchService.take();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    logger.error("File system monitor interrupted: {}", e.getMessage());
+                    return;
+                }
 
-    <build>
-        <plugins>
-            <!-- Maven Compiler Plugin -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
-                <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
-                </configuration>
-            </plugin>
+                for (WatchEvent<?> event : key.pollEvents()) {
+                    WatchEvent.Kind<?> kind = event.kind();
 
-            <!-- Spring Boot Maven Plugin -->
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <executable>true</executable>
-                </configuration>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
-    </build>
-</project>
+                    if (kind == StandardWatchEventKinds.OVERFLOW) {
+                        continue;
+                    }
+
+                    @SuppressWarnings("unchecked")
+                    WatchEvent<Path> ev = (WatchEvent<Path>) event;
+                    Path filename = ev.context();
+                    Path filePath = directory.resolve(filename);
+
+                    if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
+                        logger.info("File created: {}", filePath);
+                        listener.onFileCreated(filePath);
+                    } else if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
+                        logger.info("File deleted: {}", filePath);
+                        listener.onFileDeleted(filePath);
+                    } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
+                        logger.info("File modified: {}", filePath);
+                        listener.onFileModified(filePath);
+                    }
+                }
+
+                boolean valid = key.reset();
+                if (!valid) {
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            logger.error("Error starting file system monitor: {}", e.getMessage());
+        }
+    }
+}
+
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.nio.file.Path;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.util.Map;
+
+public class NasFileSystemEventListener implements FileSystemEventListener {
+    private static final Logger logger = LoggerFactory.getLogger(NasFileSystemEventListener.class);
+
+    private final Map<String, String> mappings;
+
+    public NasFileSystemEventListener(Map<String, String> mappings) {
+        this.mappings = mappings;
+    }
+
+    @Override
+    public void onFileCreated(Path filePath) {
+        logger.info("File created: {}", filePath);
+        moveFileToNas(filePath);
+    }
+
+    @Override
+    public void onFileDeleted(Path filePath) {
+        logger.info("File deleted: {}", filePath);
+        // Additional logic if needed
+    }
+
+    @Override
+    public void onFileModified(Path filePath) {
+        logger.info("File modified: {}", filePath);
+        // Additional logic if needed
+    }
+
+    private void moveFileToNas(Path filePath) {
+        String directory = filePath.getParent().toString();
+        String nasPath = mappings.get(directory);
+        if (nasPath != null) {
+            try {
+                Path destination = Path.of(nasPath).resolve(filePath.getFileName());
+                Files.move(filePath, destination, StandardCopyOption.REPLACE_EXISTING);
+                logger.info("File moved to NAS: {}", destination);
+            } catch (Exception e) {
+                logger.error("Error moving file to NAS: {}", e.getMessage());
+            }
+        } else {
+            logger.error("No NAS mapping found for directory: {}", directory);
+        }
+    }
+}
+
+ private void startFileSystemMonitors() {
+        Map<String, String> mappings = parseMappings(mappingsString);
+        for (Map.Entry<String, String> entry : mappings.entrySet()) {
+            Path directory = Paths.get(entry.getKey());
+            Path nasPath = Paths.get(entry.getValue());
+            FileSystemEventListener listener = new NasFileSystemEventListener(nasPath);
+
+            FileSystemMonitor monitor = new FileSystemMonitor(directory, listener);
+            try {
+                monitor.start();
+            } catch (IOException e) {
+                e.printStackTrace(); // Handle exception properly
+            }
+        }
+    }
+
 
 # Configure access logging
 server.tomcat.accesslog.enabled=true
