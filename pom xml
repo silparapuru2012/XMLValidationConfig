@@ -1,3 +1,52 @@
+import org.apache.sshd.common.file.FileSystemView;
+import org.apache.sshd.common.file.root.RootedFileSystemProvider;
+import org.apache.sshd.server.FileSystemFactory;
+import org.apache.sshd.server.session.ServerSession;
+
+import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
+public class SftpFileSystemFactory implements FileSystemFactory {
+    private final Path rootDirectory;
+
+    public SftpFileSystemFactory(String rootDirectory) {
+        this.rootDirectory = Paths.get(rootDirectory);
+    }
+
+    @Override
+    public FileSystemView createFileSystemView(ServerSession session) throws IOException {
+        return new FileSystemView() {
+            @Override
+            public Path getVirtualUserDir() {
+                return rootDirectory;
+            }
+
+            @Override
+            public Path getVirtualUserHomeDir() {
+                return rootDirectory;
+            }
+        };
+    }
+
+    @Override
+    public Path getUserHomeDir(ServerSession session) {
+        return rootDirectory;
+    }
+
+    @Override
+    public Path getDefaultHomeDir(ServerSession session) {
+        return rootDirectory;
+    }
+
+    @Override
+    public Path resolveFile(ServerSession session, String root, String file) throws IOException {
+        return new RootedFileSystemProvider().getPath(rootDirectory, file);
+    }
+}
+
+
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
