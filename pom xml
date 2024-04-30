@@ -1,0 +1,257 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>sftp-server</artifactId>
+    <version>1.0.0</version>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.6.3</version>
+    </parent>
+
+    <dependencies>
+        <!-- Spring Boot Starter -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <!-- Apache MINA SSHD -->
+        <dependency>
+            <groupId>org.apache.sshd</groupId>
+            <artifactId>sshd-spring-boot-starter</artifactId>
+            <version>2.7.0</version>
+        </dependency>
+
+        <!-- Additional dependencies if needed -->
+    </dependencies>
+
+    <properties>
+        <java.version>1.8</java.version>
+    </properties>
+
+    <build>
+        <plugins>
+            <!-- Maven Compiler Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.1</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                </configuration>
+            </plugin>
+
+            <!-- Spring Boot Maven Plugin -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <executable>true</executable>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+
+# Configure access logging
+server.tomcat.accesslog.enabled=true
+server.tomcat.accesslog.directory=logs
+server.tomcat.accesslog.prefix=access_log
+server.tomcat.accesslog.suffix=.log
+server.tomcat.accesslog.file-date-format=.yyyy-MM-dd
+server.tomcat.accesslog.buffered=false
+server.tomcat.accesslog.buffered-size=8192
+server.tomcat.accesslog.pattern=%h %l %u %t "%r" %s %b
+
+
+
+
+
+import org.apache.sshd.server.SshServer;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+public class SftpServerController {
+
+    private final SshServer sshServer;
+
+    @Autowired
+    public SftpServerController(SshServer sshServer) {
+        this.sshServer = sshServer;
+    }
+
+    @GetMapping("/health")
+    public String healthCheck() {
+        if (sshServer.isStarted()) {
+            return "SFTP Server is running!";
+        } else {
+            return "SFTP Server is not running";
+        }
+    }
+
+    @PostMapping("/shutdown")
+    public String shutdownServer() {
+        if (sshServer.isStarted()) {
+            try {
+                sshServer.stop();
+                return "SFTP Server has been shut down.";
+            } catch (Exception e) {
+                e.printStackTrace();
+                return "Failed to shut down SFTP Server: " + e.getMessage();
+            }
+        } else {
+            return "SFTP Server is not running.";
+        }
+    }
+}
+
+import org.apache.sshd.server.SshServer;
+import org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator;
+import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
+import org.apache.sshd.server.subsystem.sftp.SftpSubsystemFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Properties;
+
+@Configuration
+public class SftpServerConfiguration {
+
+    private static final Logger logger = LoggerFactory.getLogger(SftpServerConfiguration.class);
+
+    @Value("${sftp.root}")
+    private String sftpRoot;
+
+    @Value("${public.key.directory}")
+    private String publicKeyDirectory;
+
+    @Value("${mappings.file}")
+    private String mappingsFile;
+
+    @Bean
+    public SshServer sshd() throws IOException {
+        SshServer sshd = SshServer.setUpDefaultServer();
+        sshd.setPort(22); // You can set the port as needed
+
+        // Set host key provider
+        sshd.setKeyPairProvider(new SimpleGeneratorHostKeyProvider(Paths.get("hostkey.ser")));
+
+        // Set public key authenticator
+        sshd.setPublickeyAuthenticator(publickeyAuthenticator());
+
+        // Set up SFTP subsystem
+        sshd.setSubsystemFactories(new SftpSubsystemFactory());
+
+        // Set root directory for SFTP
+        Path rootDir = Paths.get(sftpRoot);
+        sshd.setFileSystemFactory(session -> rootDir);
+
+        // Set up file system listener to move files to NAS based on mappings
+        sshd.addFileSystemEventListener((event) -> {
+            if (event instanceof org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory.VfsFileEvent) {
+                org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory.VfsFileEvent vfsEvent = (org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory.VfsFileEvent) event;
+                Path sourceDir = Paths.get(vfsEvent.getTarget());
+                Path sourceFile = vfsEvent.getFile();
+
+                // Load mappings from properties file
+                Properties mappings = loadMappingsFromFile(mappingsFile);
+
+                // Check if the source directory has a mapping defined
+                String nasPath = mappings.getProperty(sourceDir.toString());
+                if (nasPath != null) {
+                    // Move the file to NAS location
+                    Path destinationDir = Paths.get(nasPath);
+                    Path destinationFile = destinationDir.resolve(sourceFile.getFileName());
+                    try {
+                        Files.createDirectories(destinationDir);
+                        Files.move(sourceFile, destinationFile);
+                        logger.info("File {} moved from {} to {}", sourceFile, sourceDir, destinationDir);
+                    } catch (IOException e) {
+                        logger.error("Error moving file {} from {} to {}: {}", sourceFile, sourceDir, destinationDir, e.getMessage());
+                    }
+                }
+            }
+        });
+
+        return sshd;
+    }
+
+    @Bean
+    public PublickeyAuthenticator publickeyAuthenticator() {
+        return (providedUsername, key, session) -> {
+            // Load the public key file for the provided username
+            Path publicKeyFile = Paths.get(publicKeyDirectory, providedUsername + ".pub");
+
+            // Check if the public key file exists
+            if (Files.exists(publicKeyFile)) {
+                try {
+                    // Read the contents of the public key file
+                    byte[] authorizedKeyBytes = Files.readAllBytes(publicKeyFile);
+                    String authorizedKey = new String(authorizedKeyBytes);
+
+                    // Check if the provided public key matches the authorized public key
+                    String providedKey = new String(key.getEncoded());
+                    if (providedKey.equals(authorizedKey.trim())) {
+                        logger.info("User {} authenticated successfully", providedUsername);
+                        return true; // Public key authentication successful
+                    }
+                } catch (IOException e) {
+                    logger.error("Error reading public key file for user {}: {}", providedUsername, e.getMessage());
+                }
+            }
+
+            logger.warn("Authentication failed for user: {}", providedUsername);
+            return false; // Public key authentication failed
+        };
+    }
+
+    private Properties loadMappingsFromFile(String mappingsFile) {
+        Properties mappings = new Properties();
+        try (FileInputStream fis = new FileInputStream(mappingsFile)) {
+            mappings.load(fis);
+        } catch (IOException e) {
+            logger.error("Error loading mappings from file {}: {}", mappingsFile, e.getMessage());
+        }
+        return mappings;
+    }
+}
+
+
+mappig.properties
+/path/to/sftp/root/app1=/path/to/nas/location1
+/path/to/sftp/root/app2=/path/to/nas/location2
+
+app.properties
+
+# SFTP root directory
+sftp.root=/path/to/sftp/root
+
+# Directory containing public key files
+public.key.directory=/path/to/public/keys
+
+# Path to mappings file
+mappings.file=/path/to/mappings.properties
